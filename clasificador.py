@@ -435,8 +435,18 @@ def _calcular_prioridad(
 # DETECCIÓN DE DUPLICADOS
 # ═══════════════════════════════════════════════════════════
 
-def detectar_duplicados(noticias: list[dict], api_key: str) -> dict[str, str]:
-    """Detecta noticias duplicadas usando Gemini (batch)."""
+def detectar_duplicados(
+    noticias: list[dict], api_key: str,
+) -> dict[str, dict]:
+    """Detecta noticias duplicadas usando Gemini (batch).
+
+    Returns:
+        dict[id_publicacion -> {
+            "grupo": "GRUPO-1: evento...",
+            "es_principal": True/False,
+            "id_principal": "id de la noticia más completa",
+        }]
+    """
     if len(noticias) < 2:
         return {}
 
@@ -457,23 +467,25 @@ def detectar_duplicados(noticias: list[dict], api_key: str) -> dict[str, str]:
     respuesta = llamar_gemini(prompt, api_key)
     datos = parsear_json_gemini(respuesta)
 
-    resultado = {}  # id -> "GRUPO-N (más completa)" o "GRUPO-N"
+    resultado = {}
 
     if datos and "grupos" in datos:
         grupos = datos["grupos"]
         for gi, grupo in enumerate(grupos, 1):
             ids = grupo.get("ids", [])
-            mejor = grupo.get("id_mas_completa", "")
+            mejor = str(grupo.get("id_mas_completa", ""))
             evento = grupo.get("evento", "")
-            etiqueta_base = f"GRUPO-{gi}"
+            etiqueta = f"GRUPO-{gi}"
             if evento:
-                etiqueta_base += f": {evento[:60]}"
+                etiqueta += f": {evento[:60]}"
             for uid in ids:
                 uid_str = str(uid)
-                if uid_str == str(mejor):
-                    resultado[uid_str] = f"{etiqueta_base} (más completa)"
-                else:
-                    resultado[uid_str] = etiqueta_base
+                es_principal = uid_str == mejor
+                resultado[uid_str] = {
+                    "grupo": etiqueta,
+                    "es_principal": es_principal,
+                    "id_principal": mejor,
+                }
         print(f"   ✅ {len(grupos)} grupo(s) de duplicados encontrados")
     else:
         print("   ✅ Sin duplicados detectados")
@@ -485,7 +497,7 @@ def detectar_duplicados(noticias: list[dict], api_key: str) -> dict[str, str]:
 # ARMADO DE FILAS DE SALIDA
 # ═══════════════════════════════════════════════════════════
 
-def armar_fila(noticia: dict, clasif: dict, dup_label: str) -> dict:
+def armar_fila(noticia: dict, clasif: dict, dup_info: dict | None) -> dict:
     """Arma una fila con todas las columnas para escribir en Sheets."""
     ahora = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
 
@@ -525,7 +537,17 @@ def armar_fila(noticia: dict, clasif: dict, dup_label: str) -> dict:
     fila["fecha_clasificacion"] = ahora
 
     # === Sección DUPLICADOS ===
-    fila["duplicados_grupo"] = dup_label
+    if dup_info:
+        fila["duplicados_grupo"] = dup_info.get("grupo", "")
+        fila["es_noticia_principal"] = "SI" if dup_info.get("es_principal") else "NO"
+        fila["duplicado_de_id"] = (
+            "" if dup_info.get("es_principal")
+            else dup_info.get("id_principal", "")
+        )
+    else:
+        fila["duplicados_grupo"] = ""
+        fila["es_noticia_principal"] = ""
+        fila["duplicado_de_id"] = ""
 
     # === Sección VALIDACIÓN HUMANA (vacía) ===
     for col in COLS_VALIDACION:
@@ -728,8 +750,8 @@ def main():
     print(f"\n📝 Armando {len(noticias)} filas para Sheets …")
     filas = []
     for noticia, clasif in zip(noticias, clasificaciones):
-        dup_label = duplicados_map.get(noticia["id_publicacion"], "")
-        fila = armar_fila(noticia, clasif, dup_label)
+        dup_info = duplicados_map.get(noticia["id_publicacion"])
+        fila = armar_fila(noticia, clasif, dup_info)
         filas.append(fila)
 
     # ── Escribir a Sheets ──
