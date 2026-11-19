@@ -142,7 +142,7 @@ PATRONES_VALORES_COMPARATIVOS = [
 # ═══════════════════════════════════════════════════════════
 COLS_DATOS = [
     "id_publicacion", "fecha_publicacion", "fuente", "titulo", "url",
-    "prioridad", "noticia_completa",
+    "prioridad", "texto_publicacion", "noticia_completa",
 ]
 
 _COLS_TEMAS = []
@@ -259,3 +259,4 @@ MAX_TEXTO_LLM = 8000
 PAUSA_ENTRE_LLM = 4         # segundos entre llamadas a Gemini
 MAX_REINTENTOS = 2
 MAX_REGISTROS_POR_ENVIO = 25  # filas por POST al Web App
+
