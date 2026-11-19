@@ -156,7 +156,11 @@ COLS_CLASIFICACION = (
        "confianza_clasificacion", "modelo_usado", "fecha_clasificacion"]
 )
 
-COLS_DUPLICADOS = ["duplicados_grupo"]
+COLS_DUPLICADOS = [
+    "duplicados_grupo",         # Ej: "GRUPO-1: operativo en Durán"
+    "es_noticia_principal",     # "SI" = la más completa del grupo, "NO" = duplicada
+    "duplicado_de_id",          # ID de la noticia principal si esta es duplicada
+]
 
 COLS_VALIDACION = [
     "nombre_revisor", "aprobacion_tematica", "tematica_corregida_humana",
@@ -197,6 +201,18 @@ Temáticas de seguridad (datos abiertos MDI/DEES): homicidios_intencionales, toq
 estados_de_excepcion, robos, narcotrafico, armas_explosivos, femicidio, operativos,
 demas_detenciones, personas_desaparecidas, trata_de_personas, trafico_ilicito_migrantes, otros_delitos.
 
+INSTRUCCIONES IMPORTANTES PARA EXTRAER VALORES NUMÉRICOS:
+- Lee y comprende TODO el contexto de la noticia, no solo busques dígitos.
+- Los valores numéricos pueden aparecer escritos en LETRAS: "tres muertos" = 3,
+  "una tonelada" = 1, "dos detenidos" = 2, "medio centenar" = 50, "una decena" = 10,
+  "un par" = 2, "docena" = 12, "centenar" = 100, "millar" = 1000.
+- Convierte SIEMPRE los números en letras a su equivalente numérico en el campo "valor".
+- Si la noticia dice "decomisaron tres armas", el valor es 3, no null.
+- Si la noticia menciona un evento sin cifra explícita (ej. "un hombre fue asesinado"),
+  el valor es 1.
+- "tipo_valor" debe ser: "absoluto" (cantidad), "porcentaje" (%), "tasa" (por 100mil hab),
+  o "comparativo" (aumento/disminución respecto a otro periodo).
+
 Responde EXACTAMENTE con este formato JSON (sin texto adicional):
 {{
   "tematica_principal": "<uno de las 13 temáticas>",
@@ -218,7 +234,11 @@ Responde EXACTAMENTE con este formato JSON (sin texto adicional):
   "otros_delitos": {{"detectado": "SI/NO", "valor": null, "tipo_valor": null}}
 }}
 
-Si hay cifras, pon "valor": <número> y "tipo_valor": "absoluto" o "porcentaje" o "tasa".
+REGLAS de "valor":
+- Si la temática se detecta ("SI"), SIEMPRE intenta extraer un valor numérico del texto.
+- Convierte palabras a números: "tres" → 3, "una" → 1, "medio centenar" → 50.
+- Si el texto implica un solo evento/persona sin cifra (ej. "fue asesinado"), valor = 1.
+- Solo deja valor = null si la temática aparece en contexto general sin evento concreto.
 En "entes_mencionados" lista SOLO nombres de instituciones que aparecen explícitamente."""
 
 
@@ -259,4 +279,3 @@ MAX_TEXTO_LLM = 8000
 PAUSA_ENTRE_LLM = 4         # segundos entre llamadas a Gemini
 MAX_REINTENTOS = 2
 MAX_REGISTROS_POR_ENVIO = 25  # filas por POST al Web App
-
