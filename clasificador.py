@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 import requests
 
 from config import (
+    COL_PRIORIDAD_ORIGEN,
     COLS_CLASIFICACION,
     COLS_DATOS,
     COLS_DUPLICADOS,
@@ -41,6 +42,7 @@ from config import (
     PATRONES_TEMAS,
     PATRONES_VALORES_COMPARATIVOS,
     PAUSA_ENTRE_LLM,
+    PRIORIDADES_PERMITIDAS,
     PROMPT_CLASIFICACION,
     PROMPT_DUPLICADOS,
     TEMAS,
@@ -101,6 +103,8 @@ _MAPEO_COLUMNAS = {
     "url": ["url", "URL", "enlace", "link"],
     "noticia_completa": ["noticia_completa", "texto", "contenido",
                          "content", "body", "extracto"],
+    "prioridad_origen": ["prioridad", "Prioridad", "priority", "nivel",
+                         "prioridad_origen"],
 }
 
 
@@ -130,6 +134,65 @@ def preparar_noticias(registros: list[dict]) -> list[dict]:
         else:
             print(f"   ⚠️  Registro {i} sin título ni texto, omitido")
     return noticias
+
+
+# ═══════════════════════════════════════════════════════════
+# PRE-FILTRO POR PRIORIDAD DE ORIGEN
+# ═══════════════════════════════════════════════════════════
+
+
+def filtrar_por_prioridad_origen(
+    registros: list[dict],
+    col_prioridad: str,
+    prioridades_permitidas: list[str],
+) -> list[dict]:
+    """Descarta registros cuya prioridad de origen NO está permitida.
+
+    Se ejecuta ANTES de preparar_noticias() y de cualquier llamada LLM,
+    ahorrando llamadas a Gemini en noticias que ya fueron clasificadas
+    como BAJA por el monitor.
+
+    Args:
+        registros: lista cruda de dicts tal como viene de Sheets.
+        col_prioridad: nombre de la columna de prioridad en la hoja
+                       (configurable vía COL_PRIORIDAD_ORIGEN o --col-prioridad).
+        prioridades_permitidas: valores aceptados (p. ej. ["ALTA", "MEDIA"]).
+
+    Returns:
+        lista filtrada de registros.
+    """
+    permitidas_upper = {p.upper() for p in prioridades_permitidas}
+
+    # Buscar la columna con variantes flexibles
+    variantes = _MAPEO_COLUMNAS.get("prioridad_origen", [col_prioridad])
+    # Asegurar que el nombre exacto configurado esté en la búsqueda
+    if col_prioridad not in variantes:
+        variantes = [col_prioridad] + list(variantes)
+
+    aceptados = []
+    sin_columna = 0
+    for reg in registros:
+        valor = ""
+        for v in variantes:
+            if v in reg:
+                valor = str(reg[v] or "").strip().upper()
+                break
+
+        if not valor:
+            # Si no existe la columna de prioridad, incluir por defecto
+            sin_columna += 1
+            aceptados.append(reg)
+        elif valor in permitidas_upper:
+            aceptados.append(reg)
+
+    descartados = len(registros) - len(aceptados)
+    if descartados:
+        print(f"\n   🔽 Pre-filtro: {descartados} noticias descartadas "
+              f"(prioridad de origen no en {prioridades_permitidas})")
+    if sin_columna:
+        print(f"   ⚠️  {sin_columna} registros sin columna '{col_prioridad}' "
+              f"— incluidos por defecto")
+    return aceptados
 
 
 # ═══════════════════════════════════════════════════════════
@@ -564,6 +627,13 @@ def main():
         action="store_true",
         help="Omitir detección de duplicados",
     )
+    parser.add_argument(
+        "--col-prioridad",
+        type=str,
+        default=None,
+        help="Nombre de la columna de prioridad en hoja origen "
+             f"(default: {COL_PRIORIDAD_ORIGEN})",
+    )
     args = parser.parse_args()
 
     # ── Variables de entorno ──
@@ -588,6 +658,21 @@ def main():
     if not registros:
         print("⚠️  No se encontraron noticias para clasificar")
         sys.exit(0)
+
+    # ── Pre-filtro por prioridad de origen ──
+    col_prior = args.col_prioridad or COL_PRIORIDAD_ORIGEN
+    if not args.incluir_baja:
+        total_antes = len(registros)
+        registros = filtrar_por_prioridad_origen(
+            registros, col_prior, PRIORIDADES_PERMITIDAS
+        )
+        if not registros:
+            print("⚠️  No quedan noticias tras el pre-filtro de prioridad")
+            sys.exit(0)
+        print(f"📊 {len(registros)}/{total_antes} registros pasan el pre-filtro "
+              f"(col: '{col_prior}', permitidas: {PRIORIDADES_PERMITIDAS})")
+    else:
+        print("   ℹ️  Pre-filtro desactivado (--incluir-baja)")
 
     noticias = preparar_noticias(registros)
     print(f"📋 {len(noticias)} noticias válidas")
