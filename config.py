@@ -97,7 +97,21 @@ PATRON_CIFRAS = (
 )
 
 # ═══════════════════════════════════════════════════════════
-# PRIORIZACIÓN
+# PRE-FILTRO DE LECTURA — Columna de prioridad en hoja origen
+# ═══════════════════════════════════════════════════════════
+# Nombre de la columna en la hoja Captura que contiene la
+# prioridad asignada por el monitor.  Si la columna cambia de
+# nombre en Sheets, basta actualizar aquí (los valores ALTA,
+# MEDIA, BAJA se mantienen).
+COL_PRIORIDAD_ORIGEN = "prioridad"
+
+# Prioridades que el clasificador debe procesar.
+# Noticias cuya prioridad de origen NO esté en esta lista
+# se descartan ANTES de la clasificación (ahorra llamadas LLM).
+PRIORIDADES_PERMITIDAS = ["ALTA", "MEDIA"]
+
+# ═══════════════════════════════════════════════════════════
+# PRIORIZACIÓN (cálculo interno del clasificador)
 # ═══════════════════════════════════════════════════════════
 ENTES_PRIORIZACION_ALTA = [
     "Presidencia",
