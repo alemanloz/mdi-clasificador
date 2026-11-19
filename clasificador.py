@@ -105,6 +105,8 @@ _MAPEO_COLUMNAS = {
                          "content", "body", "extracto"],
     "prioridad_origen": ["prioridad", "Prioridad", "priority", "nivel",
                          "prioridad_origen"],
+    "texto_publicacion": ["texto_publicacion", "texto_publicación",
+                          "Texto_publicacion", "texto publicacion"],
 }
 
 
@@ -127,6 +129,9 @@ def preparar_noticias(registros: list[dict]) -> list[dict]:
             "fecha_publicacion": _buscar_campo(reg, "fecha_publicacion"),
             "url": _buscar_campo(reg, "url"),
             "noticia_completa": _buscar_campo(reg, "noticia_completa"),
+            # Campos copiados directamente de la hoja Captura
+            "prioridad_origen": _buscar_campo(reg, "prioridad_origen"),
+            "texto_publicacion": _buscar_campo(reg, "texto_publicacion"),
         }
         # Necesitamos al menos título o texto
         if noticia["titulo"] or noticia["noticia_completa"]:
@@ -492,7 +497,10 @@ def armar_fila(noticia: dict, clasif: dict, dup_label: str) -> dict:
     fila["fuente"] = noticia.get("fuente", "")
     fila["titulo"] = noticia.get("titulo", "")
     fila["url"] = noticia.get("url", "")
-    fila["prioridad"] = clasif.get("prioridad", "BAJA")
+    # Prioridad: se copia directamente de la hoja Captura (no se recalcula)
+    fila["prioridad"] = noticia.get("prioridad_origen", "") or clasif.get("prioridad", "MEDIA")
+    # texto_publicacion: copiado de Captura para revisión inmediata del evaluador
+    fila["texto_publicacion"] = noticia.get("texto_publicacion", "")[:5000]
     fila["noticia_completa"] = noticia.get("noticia_completa", "")[:2000]
 
     # === Sección CLASIFICACIÓN LLM ===
@@ -695,28 +703,17 @@ def main():
             time.sleep(PAUSA_ENTRE_LLM)
 
         clasificaciones.append(clasif)
+        prior_origen = noticia.get("prioridad_origen", "?")
         print(
             f"           → {clasif['tematica_principal']} "
-            f"| {clasif['prioridad']} | {clasif['confianza_clasificacion']}"
+            f"| prioridad origen: {prior_origen} "
+            f"| {clasif['confianza_clasificacion']}"
         )
 
-    # ── Filtro de prioridad ──
-    if not args.incluir_baja:
-        antes = len(noticias)
-        pares = [
-            (n, c)
-            for n, c in zip(noticias, clasificaciones)
-            if c["prioridad"] != "BAJA"
-        ]
-        if pares:
-            noticias, clasificaciones = zip(*pares)
-            noticias = list(noticias)
-            clasificaciones = list(clasificaciones)
-        else:
-            noticias, clasificaciones = [], []
-        filtradas = antes - len(noticias)
-        if filtradas:
-            print(f"\n   🔽 {filtradas} noticias BAJA filtradas")
+    # Nota: el filtro de prioridad BAJA se realiza ANTES de la
+    # clasificación (pre-filtro por prioridad de origen de Captura).
+    # La prioridad en la salida se copia directamente de Captura,
+    # no se recalcula.
 
     if not noticias:
         print("\n⚠️  No quedan noticias tras filtrar por prioridad")
