@@ -37,6 +37,11 @@ on:
         required: false
         type: boolean
         default: false
+      col_prioridad:
+        description: "Columna de prioridad en hoja origen (vacío = config default)"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   clasificar:
@@ -88,6 +93,11 @@ jobs:
 
           if [ "${{ inputs.sin_duplicados }}" = "true" ]; then
             ARGS="$ARGS --sin-duplicados"
+          fi
+
+          COL_PRIOR="${{ inputs.col_prioridad }}"
+          if [ -n "$COL_PRIOR" ]; then
+            ARGS="$ARGS --col-prioridad \"$COL_PRIOR\""
           fi
 
           echo "🚀 Ejecutando: python clasificador.py $ARGS"
