@@ -1,0 +1,94 @@
+name: Clasificar Noticias MDI
+
+on:
+  # Ejecución manual desde la interfaz de GitHub
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: "Modo de clasificación"
+        required: true
+        type: choice
+        options:
+          - gemini
+          - solo-regex
+        default: gemini
+      incluir_baja:
+        description: "¿Incluir noticias de prioridad BAJA?"
+        required: false
+        type: boolean
+        default: false
+      limite:
+        description: "Máximo de noticias (0 = todas)"
+        required: false
+        type: number
+        default: 0
+      hoja_origen:
+        description: "Nombre de hoja origen (vacío = default)"
+        required: false
+        type: string
+        default: ""
+      hoja_destino:
+        description: "Nombre de hoja destino"
+        required: false
+        type: string
+        default: "Validacion"
+      sin_duplicados:
+        description: "¿Omitir detección de duplicados?"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  clasificar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Ejecutar clasificador
+        env:
+          WEBAPP_URL: ${{ secrets.WEBAPP_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          ARGS=""
+
+          if [ "${{ inputs.modo }}" = "solo-regex" ]; then
+            ARGS="$ARGS --solo-regex"
+          fi
+
+          if [ "${{ inputs.incluir_baja }}" = "true" ]; then
+            ARGS="$ARGS --incluir-baja"
+          fi
+
+          LIMITE="${{ inputs.limite }}"
+          if [ -n "$LIMITE" ] && [ "$LIMITE" != "0" ]; then
+            ARGS="$ARGS --limite $LIMITE"
+          fi
+
+          HOJA="${{ inputs.hoja_origen }}"
+          if [ -n "$HOJA" ]; then
+            ARGS="$ARGS --hoja \"$HOJA\""
+          fi
+
+          DESTINO="${{ inputs.hoja_destino }}"
+          if [ -n "$DESTINO" ]; then
+            ARGS="$ARGS --hoja-destino \"$DESTINO\""
+          fi
+
+          if [ "${{ inputs.sin_duplicados }}" = "true" ]; then
+            ARGS="$ARGS --sin-duplicados"
+          fi
+
+          echo "🚀 Ejecutando: python clasificador.py $ARGS"
+          eval python clasificador.py $ARGS
