@@ -773,7 +773,7 @@ def main():
     if duplicados_map:
         grupos = set()
         for v in duplicados_map.values():
-            grupos.add(v.split(":")[0].split("(")[0].strip())
+            grupos.add(v["grupo"].split(":")[0].strip())
         print(f"  Grupos duplicados: {len(grupos)}")
     print(f"  Escritura a Sheets: {'✅ OK' if ok else '❌ FALLÓ'}")
     print("=" * 60)
