@@ -29,13 +29,18 @@ from config import (
     COLS_DATOS,
     COLS_DUPLICADOS,
     COLS_ESTATUS,
+    COLS_PRIORIDAD_1,
     COLS_VALIDACION,
+    COLS_VERIFICACION_HUMANA,
     ENTES,
     ENTES_PRIORIZACION_ALTA,
     GEMINI_API_URL,
     GEMINI_MODEL,
+    GROQ_API_URL,
+    GROQ_MODEL,
     MAX_REGISTROS_POR_ENVIO,
     MAX_REINTENTOS,
+    MAX_REINTENTOS_GROQ,
     MAX_TEXTO_LLM,
     PALABRAS_ENTES_ALTA,
     PATRON_CIFRAS,
@@ -339,8 +344,62 @@ def parsear_json_gemini(texto: str) -> dict | None:
     return None
 
 
-def clasificar_noticia(noticia: dict, api_key: str) -> dict:
-    """Clasifica una noticia con Gemini, fallback a regex."""
+# ═══════════════════════════════════════════════════════════
+# CLASIFICACIÓN CON GROQ (fallback de Gemini)
+# ═══════════════════════════════════════════════════════════
+
+def llamar_groq(prompt: str, api_key: str) -> str | None:
+    """Llama a la API de Groq (formato OpenAI) y devuelve el texto."""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": GROQ_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Eres un analista de seguridad de Ecuador del "
+                    "Ministerio del Interior (MDI). Responde SOLO con "
+                    "JSON válido, sin texto adicional."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.1,
+        "max_tokens": 2048,
+    }
+
+    for intento in range(MAX_REINTENTOS_GROQ + 1):
+        try:
+            resp = requests.post(
+                GROQ_API_URL, json=payload, headers=headers, timeout=60,
+            )
+            if resp.status_code == 429:
+                espera = 2 ** (intento + 2)
+                print(f"   ⏳ Groq rate limit, esperando {espera}s …")
+                time.sleep(espera)
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            choices = data.get("choices", [])
+            if choices:
+                return choices[0].get("message", {}).get("content", "")
+            return None
+        except requests.RequestException as e:
+            if intento < MAX_REINTENTOS_GROQ:
+                print(f"   ⚠️  Error Groq (intento {intento + 1}): {e}")
+                time.sleep(2 ** (intento + 1))
+            else:
+                print(f"   ❌ Error Groq agotado: {e}")
+                return None
+    return None
+
+
+def clasificar_noticia(noticia: dict, api_key: str,
+                       groq_api_key: str = "") -> dict:
+    """Clasifica una noticia: Gemini → Groq → regex."""
     texto = noticia.get("noticia_completa", "")
     if len(texto) > MAX_TEXTO_LLM:
         texto = texto[:MAX_TEXTO_LLM] + " [TRUNCADO]"
@@ -352,11 +411,24 @@ def clasificar_noticia(noticia: dict, api_key: str) -> dict:
         texto=texto or noticia.get("titulo", ""),
     )
 
+    # ── Intento 1: Gemini ──
+    modelo_usado = GEMINI_MODEL
     respuesta = llamar_gemini(prompt, api_key)
     datos = parsear_json_gemini(respuesta)
 
+    # ── Intento 2: Groq (si Gemini falló) ──
     if not datos or "tematica_principal" not in datos:
-        print(f"   ⚠️  Gemini no devolvió JSON válido, usando regex")
+        if groq_api_key:
+            print(f"   ⚠️  Gemini no respondió, intentando Groq …")
+            modelo_usado = GROQ_MODEL
+            respuesta = llamar_groq(prompt, groq_api_key)
+            datos = parsear_json_gemini(respuesta)
+        else:
+            datos = None
+
+    # ── Intento 3: regex (si ambos LLM fallaron) ──
+    if not datos or "tematica_principal" not in datos:
+        print(f"   ⚠️  LLMs no devolvieron JSON válido, usando regex")
         return clasificar_regex(noticia)
 
     # Normalizar tema principal
@@ -410,7 +482,7 @@ def clasificar_noticia(noticia: dict, api_key: str) -> dict:
         "prioridad": prioridad,
         "prioridad_1": prioridad_1,
         "confianza_clasificacion": "llm",
-        "modelo_usado": GEMINI_MODEL,
+        "modelo_usado": modelo_usado,
     }
 
 
@@ -475,8 +547,9 @@ def _calcular_prioridad_1(
 
 def detectar_duplicados(
     noticias: list[dict], api_key: str,
+    groq_api_key: str = "",
 ) -> dict[str, dict]:
-    """Detecta noticias duplicadas usando Gemini (batch).
+    """Detecta noticias duplicadas usando Gemini → Groq (batch).
 
     Returns:
         dict[id_publicacion -> {
@@ -504,6 +577,12 @@ def detectar_duplicados(
     print(f"🔍 Detectando duplicados entre {len(noticias)} noticias …")
     respuesta = llamar_gemini(prompt, api_key)
     datos = parsear_json_gemini(respuesta)
+
+    # Fallback a Groq si Gemini no devolvió datos válidos
+    if (not datos or "grupos" not in datos) and groq_api_key:
+        print(f"   ⚠️  Gemini no respondió para duplicados, intentando Groq …")
+        respuesta = llamar_groq(prompt, groq_api_key)
+        datos = parsear_json_gemini(respuesta)
 
     resultado = {}
 
@@ -573,6 +652,10 @@ def armar_fila(noticia: dict, clasif: dict, dup_info: dict | None) -> dict:
     fila["modelo_usado"] = clasif.get("modelo_usado", "")
     fila["fecha_clasificacion"] = ahora
 
+    # === Sección VERIFICACIÓN HUMANA DE CATEGORÍAS (vacía, la llena el evaluador) ===
+    fila["verificacion_humana_categorias"] = ""
+
+    # === Sección PRIORIDAD_1 ===
     # prioridad_1: determinada por el LLM (tema+ente=ALTA, tema+cifras=MEDIA, resto=BAJA)
     # Distinta de "prioridad" (col F) que se copia de Captura.
     fila["prioridad_1"] = clasif.get("prioridad_1", "BAJA")
@@ -714,15 +797,23 @@ def main():
         sys.exit(1)
 
     api_key = os.environ.get("GEMINI_API_KEY", "")
+    groq_api_key = os.environ.get("GROQ_API_KEY", "")
     if not args.solo_regex and not api_key:
         print("❌ Falta variable GEMINI_API_KEY (o usa --solo-regex)")
         sys.exit(1)
+    if groq_api_key:
+        print("   ✅ Groq configurado como fallback de Gemini")
+    else:
+        print("   ℹ️  GROQ_API_KEY no configurada — fallback será solo regex")
 
     # ── Lectura ──
     print("=" * 60)
     print("MDI CLASIFICADOR DE NOTICIAS (cloud)")
     print(f"Fecha: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
-    print(f"Modo: {'regex' if args.solo_regex else 'Gemini + regex fallback'}")
+    modo_txt = "regex" if args.solo_regex else (
+        "Gemini → Groq → regex" if groq_api_key else "Gemini → regex"
+    )
+    print(f"Modo: {modo_txt}")
     print("=" * 60)
 
     registros = leer_desde_sheets(webapp_url, args.hoja)
@@ -762,7 +853,7 @@ def main():
         if args.solo_regex:
             clasif = clasificar_regex(noticia)
         else:
-            clasif = clasificar_noticia(noticia, api_key)
+            clasif = clasificar_noticia(noticia, api_key, groq_api_key)
             time.sleep(PAUSA_ENTRE_LLM)
 
         clasificaciones.append(clasif)
@@ -785,7 +876,7 @@ def main():
     # ── Duplicados ──
     duplicados_map = {}
     if not args.sin_duplicados and not args.solo_regex and len(noticias) >= 2:
-        duplicados_map = detectar_duplicados(noticias, api_key)
+        duplicados_map = detectar_duplicados(noticias, api_key, groq_api_key)
 
     # ── Armar filas ──
     print(f"\n📝 Armando {len(noticias)} filas para Sheets …")
