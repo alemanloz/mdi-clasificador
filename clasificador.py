@@ -254,6 +254,11 @@ def clasificar_regex(noticia: dict) -> dict:
         tematica_principal, entes_detectados, tiene_cifras, texto_lower
     )
 
+    # prioridad_1: tema+ente=ALTA, tema+cifras_comparativas=MEDIA, resto=BAJA
+    prioridad_1 = _calcular_prioridad_1(
+        tematica_principal, entes_detectados, tiene_cifras
+    )
+
     return {
         "tematica_principal": tematica_principal,
         "tematicas_detectadas": temas_detectados,
@@ -261,6 +266,7 @@ def clasificar_regex(noticia: dict) -> dict:
         "tiene_cifras_comparativas": tiene_cifras,
         "detalles_temas": detalles_temas,
         "prioridad": prioridad,
+        "prioridad_1": prioridad_1,
         "confianza_clasificacion": "regex",
         "modelo_usado": "regex",
     }
@@ -388,6 +394,13 @@ def clasificar_noticia(noticia: dict, api_key: str) -> dict:
 
     prioridad = _calcular_prioridad(tema_p, entes, cifras, texto_completo)
 
+    # prioridad_1: preferir la del LLM; fallback a cálculo local
+    prioridad_1_llm = str(datos.get("prioridad_1", "")).upper()
+    if prioridad_1_llm in ("ALTA", "MEDIA", "BAJA"):
+        prioridad_1 = prioridad_1_llm
+    else:
+        prioridad_1 = _calcular_prioridad_1(tema_p, entes, cifras)
+
     return {
         "tematica_principal": tema_p,
         "tematicas_detectadas": temas_det,
@@ -395,6 +408,7 @@ def clasificar_noticia(noticia: dict, api_key: str) -> dict:
         "tiene_cifras_comparativas": cifras,
         "detalles_temas": detalles,
         "prioridad": prioridad,
+        "prioridad_1": prioridad_1,
         "confianza_clasificacion": "llm",
         "modelo_usado": GEMINI_MODEL,
     }
@@ -426,6 +440,30 @@ def _calcular_prioridad(
 
     # MEDIA: tema reconocido (sin ente clave ni cifras)
     if es_tema_real:
+        return "MEDIA"
+
+    return "BAJA"
+
+
+def _calcular_prioridad_1(
+    tema: str,
+    entes: list[str],
+    cifras_comparativas: bool,
+) -> str:
+    """Calcula prioridad_1 (independiente de la prioridad copiada de Captura).
+
+    - ALTA: la noticia tiene al menos una temática de seguridad Y menciona
+            algún ente gubernamental de seguridad.
+    - MEDIA: la noticia tiene al menos una temática de seguridad Y contiene
+             valores comparativos (cifras contrastables con datos MDI).
+    - BAJA: todo lo demás.
+    """
+    es_tema_real = tema in TEMAS and tema != "otros_delitos"
+
+    if es_tema_real and entes:
+        return "ALTA"
+
+    if es_tema_real and cifras_comparativas:
         return "MEDIA"
 
     return "BAJA"
@@ -513,7 +551,6 @@ def armar_fila(noticia: dict, clasif: dict, dup_info: dict | None) -> dict:
     fila["prioridad"] = noticia.get("prioridad_origen", "") or clasif.get("prioridad", "MEDIA")
     # texto_publicacion: copiado de Captura para revisión inmediata del evaluador
     fila["texto_publicacion"] = noticia.get("texto_publicacion", "")[:5000]
-    fila["noticia_completa"] = noticia.get("noticia_completa", "")[:2000]
 
     # === Sección CLASIFICACIÓN LLM ===
     fila["tematica_principal"] = clasif.get("tematica_principal", "")
@@ -535,6 +572,10 @@ def armar_fila(noticia: dict, clasif: dict, dup_info: dict | None) -> dict:
     fila["confianza_clasificacion"] = clasif.get("confianza_clasificacion", "")
     fila["modelo_usado"] = clasif.get("modelo_usado", "")
     fila["fecha_clasificacion"] = ahora
+
+    # prioridad_1: determinada por el LLM (tema+ente=ALTA, tema+cifras=MEDIA, resto=BAJA)
+    # Distinta de "prioridad" (col F) que se copia de Captura.
+    fila["prioridad_1"] = clasif.get("prioridad_1", "BAJA")
 
     # === Sección DUPLICADOS ===
     if dup_info:
@@ -728,7 +769,7 @@ def main():
         prior_origen = noticia.get("prioridad_origen", "?")
         print(
             f"           → {clasif['tematica_principal']} "
-            f"| prioridad origen: {prior_origen} "
+            f"| p_origen: {prior_origen} | p1: {clasif.get('prioridad_1', '?')} "
             f"| {clasif['confianza_clasificacion']}"
         )
 
@@ -759,17 +800,25 @@ def main():
     ok = escribir_a_sheets(webapp_url, filas, args.hoja_destino)
 
     # ── Resumen ──
-    conteo = {}
-    for c in clasificaciones:
-        p = c["prioridad"]
-        conteo[p] = conteo.get(p, 0) + 1
+    conteo_origen = {}
+    conteo_p1 = {}
+    for fila_r, c in zip(filas, clasificaciones):
+        po = fila_r.get("prioridad", "?")
+        conteo_origen[po] = conteo_origen.get(po, 0) + 1
+        p1 = c.get("prioridad_1", "BAJA")
+        conteo_p1[p1] = conteo_p1.get(p1, 0) + 1
 
     print("\n" + "=" * 60)
     print("RESUMEN")
     print(f"  Total clasificadas: {len(filas)}")
+    print("  Prioridad (origen Captura):")
     for p in ["ALTA", "MEDIA", "BAJA"]:
-        if p in conteo:
-            print(f"  {p}: {conteo[p]}")
+        if p in conteo_origen:
+            print(f"    {p}: {conteo_origen[p]}")
+    print("  Prioridad_1 (calculada por LLM):")
+    for p in ["ALTA", "MEDIA", "BAJA"]:
+        if p in conteo_p1:
+            print(f"    {p}: {conteo_p1[p]}")
     if duplicados_map:
         grupos = set()
         for v in duplicados_map.values():

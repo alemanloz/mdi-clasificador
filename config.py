@@ -142,7 +142,7 @@ PATRONES_VALORES_COMPARATIVOS = [
 # ═══════════════════════════════════════════════════════════
 COLS_DATOS = [
     "id_publicacion", "fecha_publicacion", "fuente", "titulo", "url",
-    "prioridad", "texto_publicacion", "noticia_completa",
+    "prioridad", "texto_publicacion",
 ]
 
 _COLS_TEMAS = []
@@ -153,7 +153,8 @@ COLS_CLASIFICACION = (
     ["tematica_principal", "tematicas_detectadas"]
     + _COLS_TEMAS
     + ["entes_mencionados", "tiene_cifras_comparativas",
-       "confianza_clasificacion", "modelo_usado", "fecha_clasificacion"]
+       "confianza_clasificacion", "modelo_usado", "fecha_clasificacion",
+       "prioridad_1"]
 )
 
 COLS_DUPLICADOS = [
@@ -213,12 +214,23 @@ INSTRUCCIONES IMPORTANTES PARA EXTRAER VALORES NUMÉRICOS:
 - "tipo_valor" debe ser: "absoluto" (cantidad), "porcentaje" (%), "tasa" (por 100mil hab),
   o "comparativo" (aumento/disminución respecto a otro periodo).
 
+CLASIFICACIÓN DE PRIORIDAD_1 (distinta de la columna "prioridad" que viene de Captura):
+- "ALTA": la noticia tiene al menos una temática de seguridad Y además menciona explícitamente
+  alguno de estos entes: Presidencia, Ministerio del Interior, Policía Nacional, Ministerio de
+  Defensa Nacional, SNAI, ECU 911 u otras instituciones gubernamentales de seguridad.
+- "MEDIA": la noticia tiene al menos una temática de seguridad Y además contiene valores
+  comparativos (al menos dos cifras numéricas con temporalidad que permitan contrastar, como
+  "aumentó de 10 a 15", "en 2024 fueron 50 vs 70 en 2025", "bajó un 20%", o cualquier
+  comparación entre periodos o cifras contrastables con datos oficiales del MDI).
+- "BAJA": todo lo que no cumple los criterios de ALTA ni MEDIA.
+
 Responde EXACTAMENTE con este formato JSON (sin texto adicional):
 {{
   "tematica_principal": "<uno de las 13 temáticas>",
   "tematicas_detectadas": ["tema1", "tema2"],
   "entes_mencionados": ["ente1", "ente2"],
   "tiene_cifras_comparativas": true/false,
+  "prioridad_1": "ALTA/MEDIA/BAJA",
   "homicidios_intencionales": {{"detectado": "SI/NO", "valor": null, "tipo_valor": null}},
   "toques_de_queda": {{"detectado": "SI/NO", "valor": null, "tipo_valor": null}},
   "estados_de_excepcion": {{"detectado": "SI/NO", "valor": null, "tipo_valor": null}},
