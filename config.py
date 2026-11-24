@@ -153,9 +153,14 @@ COLS_CLASIFICACION = (
     ["tematica_principal", "tematicas_detectadas"]
     + _COLS_TEMAS
     + ["entes_mencionados", "tiene_cifras_comparativas",
-       "confianza_clasificacion", "modelo_usado", "fecha_clasificacion",
-       "prioridad_1"]
+       "confianza_clasificacion", "modelo_usado", "fecha_clasificacion"]
 )
+
+# Columna de verificación humana de categorías (entre clasificación LLM y prioridad_1)
+COLS_VERIFICACION_HUMANA = ["verificacion_humana_categorias"]
+
+# Prioridad calculada por el LLM (distinta de "prioridad" copiada de Captura)
+COLS_PRIORIDAD_1 = ["prioridad_1"]
 
 COLS_DUPLICADOS = [
     "duplicados_grupo",         # Ej: "GRUPO-1: operativo en Durán"
@@ -172,18 +177,29 @@ COLS_VALIDACION = [
 COLS_ESTATUS = ["estatus_notificacion"]
 
 TODAS_COLUMNAS = (
-    COLS_DATOS + COLS_CLASIFICACION + COLS_DUPLICADOS
-    + COLS_VALIDACION + COLS_ESTATUS
+    COLS_DATOS + COLS_CLASIFICACION + COLS_VERIFICACION_HUMANA
+    + COLS_PRIORIDAD_1 + COLS_DUPLICADOS + COLS_VALIDACION + COLS_ESTATUS
 )
+
+# Opciones de temáticas para dropdown de tematica_corregida_humana
+OPCIONES_TEMATICAS_DROPDOWN = TEMAS[:]  # copia de las 13 temáticas
 
 # ═══════════════════════════════════════════════════════════
 # GEMINI
 # ═══════════════════════════════════════════════════════════
-GEMINI_MODEL = "gemini-3.5-flash-lite"
+GEMINI_MODEL = "gemini-3.1-flash-lite"
 GEMINI_API_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models"
     "/{model}:generateContent?key={api_key}"
 )
+
+# ═══════════════════════════════════════════════════════════
+# GROQ (fallback cuando Gemini falla)
+# ═══════════════════════════════════════════════════════════
+# Free tier permanente: 14,400 req/día, 30 RPM, sin tarjeta.
+# Endpoint compatible con OpenAI (chat/completions).
+GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 # ═══════════════════════════════════════════════════════════
 # PROMPTS
@@ -288,6 +304,7 @@ Si NO hay noticias duplicadas, responde: {{"grupos": []}}"""
 # LÍMITES
 # ═══════════════════════════════════════════════════════════
 MAX_TEXTO_LLM = 8000
-PAUSA_ENTRE_LLM = 4         # segundos entre llamadas a Gemini
+PAUSA_ENTRE_LLM = 4         # segundos entre llamadas a LLM
 MAX_REINTENTOS = 2
+MAX_REINTENTOS_GROQ = 1     # menos reintentos para el fallback
 MAX_REGISTROS_POR_ENVIO = 25  # filas por POST al Web App
